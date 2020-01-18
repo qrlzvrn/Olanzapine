@@ -1,25 +1,26 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"strconv"
 
-	"github.com/urfave/cli"
+	"github.com/jmoiron/sqlx"
+	"github.com/urfave/cli/v2"
 
-	_ "github.com/jackc/pgx/v4"
+	_ "github.com/lib/pq"
 )
 
 //Структура, в которую считываются данные введенные пользователем при добавлении новой задачи
 type task struct {
-	id       int
 	content  string
-	complete bool
 	category string
 	deadline string
 }
 
 var table = `
-CREATE TABLE task (
+CREATE TABLE tasks (
 	id SERIAL,
 	content TEXT NOT NULL,
 	complete BOOLEAN,
@@ -35,32 +36,90 @@ func main() {
 			{
 				Name:  "add",
 				Usage: "",
-				//Flags: ,
-				//Action: ,
-				//считываем данные с флагов в экземпляр структуры
-				//открывем соединение с бд
-				//помещаем полуившиеся поля структуры в запрос к базе
-				//сообщаем пользователю, что задача добавлена, если не было выброшено ни одной ошибки
-				//закрываем соединение с базой
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:     "content",
+						Aliases:  []string{"C"},
+						Usage:    "set task content",
+						Required: true,
+					},
+					&cli.StringFlag{
+						Name:    "category",
+						Aliases: []string{"c"},
+						Value:   "Purgatorium",
+						Usage:   "set task category",
+					},
+					&cli.StringFlag{
+						Name:    "deadline",
+						Aliases: []string{"d"},
+						Value:   "NULL",
+						Usage:   "set task deadline",
+					},
+				},
+				Action: func(c *cli.Context) error {
+					t := task{
+						content:  c.String("content"),
+						category: c.String("category"),
+						deadline: c.String("deadline"),
+					}
+
+					if t.content == "" {
+						err := fmt.Errorf("task content can't be empty")
+						return err
+					}
+
+					if err := addTask(t); err != nil {
+						return err
+					}
+
+					fmt.Println("added new task: ", t.content)
+
+					return nil
+				},
 			},
 			{
 				Name:  "complete",
 				Usage: "",
-				//Action: ,
-				//считывем id задачи, которую нужно завершить
-				//открывем соединение с бд
-				//апдейтим значение complete у нужной задачи
-				//если задача не найдена, бросаем ошибку
-				//елси ошибок нет, то сообщаем о том, что задача выполнена
-				//закрываем соединение с бд
+				Action: func(c *cli.Context) error {
+					ID := c.Args().First()
+					if ID == "" {
+						err := fmt.Errorf("task ID cannot be empty")
+						return err
+					}
+
+					IDint, err := strconv.Atoi(ID)
+					if err != nil {
+						return err
+					}
+
+					if err := completeTask(IDint); err != nil {
+						return err
+					}
+					fmt.Printf("task with an id=%v has completed\n", IDint)
+					return nil
+				},
 			},
 			{
 				Name:  "delete",
 				Usage: "",
-				//Action: ,
-				//открываем бд
-				//находим все задачи с complete=true и удаляем их
-				//Успешно - сообщаем пользователю и закрываем соединение с базой
+				Action: func(c *cli.Context) error {
+					ID := c.Args().First()
+					if ID == "" {
+						err := fmt.Errorf("task ID cannot be empty")
+						return err
+					}
+
+					IDint, err := strconv.Atoi(ID)
+					if err != nil {
+						return err
+					}
+
+					if err := deleteTask(IDint); err != nil {
+						return err
+					}
+					fmt.Printf("task with an id=%v has removed\n", IDint)
+					return nil
+				},
 			},
 			{
 				Name:  "init",
@@ -90,4 +149,60 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func addTask(t task) error {
+	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx := db.MustBegin()
+
+	if t.deadline == "NULL" {
+		tx.MustExec("INSERT INTO tasks (content, category, complete) VALUES ($1, $2, $3)", t.content, t.category, false)
+	} else {
+		tx.MustExec("INSERT INTO tasks (content, category, deadline, complete) VALUES ($1, $2, $3, $4)", t.content, t.category, t.deadline, false)
+	}
+	tx.Commit()
+	return nil
+}
+
+func completeTask(ID int) error {
+	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx := db.MustBegin()
+	tx.MustExec("UPDATE tasks SET complete=true WHERE id = $1", ID)
+	tx.Commit()
+
+	return nil
+}
+
+func deleteTask(ID int) error {
+	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx := db.MustBegin()
+	tx.MustExec("DELETE FROM tasks WHERE id=$1", ID)
+	tx.Commit()
+
+	return nil
+}
+
+func listTasks() error {
+
+	return nil
+}
+
+func initTableTasks() error {
+
+	return nil
 }
