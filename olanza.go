@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/olekukonko/tablewriter"
 	"github.com/urfave/cli/v2"
 
 	_ "github.com/lib/pq"
@@ -35,7 +36,7 @@ func main() {
 		Commands: []*cli.Command{
 			{
 				Name:  "add",
-				Usage: "",
+				Usage: "add a new task",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:     "content",
@@ -79,7 +80,7 @@ func main() {
 			},
 			{
 				Name:  "complete",
-				Usage: "",
+				Usage: "complete the task",
 				Action: func(c *cli.Context) error {
 					ID := c.Args().First()
 					if ID == "" {
@@ -101,7 +102,7 @@ func main() {
 			},
 			{
 				Name:  "delete",
-				Usage: "",
+				Usage: "delete the task",
 				Action: func(c *cli.Context) error {
 					ID := c.Args().First()
 					if ID == "" {
@@ -109,39 +110,62 @@ func main() {
 						return err
 					}
 
-					IDint, err := strconv.Atoi(ID)
+					intID, err := strconv.Atoi(ID)
 					if err != nil {
 						return err
 					}
 
-					if err := deleteTask(IDint); err != nil {
+					if err := deleteTask(intID); err != nil {
 						return err
 					}
-					fmt.Printf("task with an id=%v has removed\n", IDint)
+					fmt.Printf("task with an id=%v has removed\n", intID)
 					return nil
 				},
 			},
 			{
 				Name:  "init",
-				Usage: "",
-				//Action: ,
-				//проверяем существование бд
-				//Если все в порядке, то создаем таблицу
-				//иначе выбрасываем ошибку и сообщаем пользователю, что базы данных не существует и ее нужно создать
-				//закрываем соединение с бд
+				Usage: "create the table for storing tasks",
+				Action: func(c *cli.Context) error {
+					initTableTasks()
 
+					return nil
+				},
 			},
 			{
 				Name:    "list",
-				Aliases: []string{"s"},
-				Usage:   "",
-				//Action: ,
-				//если пользователь вводит еще и категорию, то выводим только подходящие
-				//если не введено ничего, то выводим все задачи
-				//если получаем ключ --all/-a, то выводим даже выполненные задачи
-				//открывем базу; делаем SELECT, считвыаем все в [][]string
-				//строим из этих данных таблицу, что бы все аккуратно выводилось в консоль
-				//закрываем соединение с бд
+				Aliases: []string{"ls"},
+				Usage:   "list the tasks",
+				Action: func(c *cli.Context) error {
+					if c.NArg() > 0 {
+						category := c.Args().First()
+						if err := listTasks(category); err != nil {
+							return err
+						}
+					} else {
+						if err := listTasks("allCategory"); err != nil {
+							return err
+						}
+					}
+					return nil
+				},
+			},
+			{
+				Name:    "reDead",
+				Aliases: []string{"rd"},
+				Usage:   "reassign task deadline",
+				Action: func(c *cli.Context) error {
+					ID := c.Args().First()
+					intID, err := strconv.Atoi(ID)
+					if err != nil {
+						return err
+					}
+					newDeadline := c.Args().Get(1)
+
+					reDead(intID, newDeadline)
+					fmt.Printf("deadline of task with an ID %v changed on %s\n", intID, newDeadline)
+
+					return nil
+				},
 			},
 		},
 	}
@@ -197,12 +221,93 @@ func deleteTask(ID int) error {
 	return nil
 }
 
-func listTasks() error {
+func reDead(ID int, newDeadline string) error {
+	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx := db.MustBegin()
+	tx.MustExec("UPDATE tasks set deadline=$1 WHERE id=$2", newDeadline, ID)
+	tx.Commit()
+
+	return nil
+}
+
+func listTasks(category string) error {
+
+	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	data := [][]string{}
+
+	if category == "allCategory" {
+		rows, err := db.Queryx("SELECT id, content, complete, category, deadline-now()::date FROM tasks")
+		if err != nil {
+			return err
+		}
+
+		for rows.Next() {
+			var id int
+			var content string
+			var complete bool
+			var category string
+			var deadline string
+			rows.Scan(&id, &content, &complete, &category, &deadline)
+
+			data = append(data, []string{strconv.Itoa(id), content, strconv.FormatBool(complete), category, deadline})
+			defer rows.Close()
+		}
+
+	} else {
+		rows, err := db.Queryx("SELECT id, content, complete, category, deadline-now()::date FROM tasks WHERE category=$1", category)
+		if err != nil {
+			return err
+		}
+
+		for rows.Next() {
+			var id int
+			var content string
+			var complete bool
+			var category string
+			var deadline string
+			rows.Scan(&id, &content, &complete, &category, &deadline)
+
+			data = append(data, []string{strconv.Itoa(id), content, strconv.FormatBool(complete), category, deadline})
+			defer rows.Close()
+		}
+	}
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"ID", "content", "complete", "category", "deadline"})
+	table.SetBorders(tablewriter.Border{Left: true, Top: true, Right: true, Bottom: true})
+
+	table.SetHeaderColor(
+		tablewriter.Colors{tablewriter.FgGreenColor},
+		tablewriter.Colors{tablewriter.FgGreenColor},
+		tablewriter.Colors{tablewriter.FgGreenColor},
+		tablewriter.Colors{tablewriter.FgGreenColor},
+		tablewriter.Colors{tablewriter.FgGreenColor})
+	table.SetCenterSeparator("|")
+	table.SetRowLine(true)
+	table.AppendBulk(data)
+	table.Render()
 
 	return nil
 }
 
 func initTableTasks() error {
+	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	db.MustExec(table)
 
 	return nil
 }
