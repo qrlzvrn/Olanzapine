@@ -88,15 +88,16 @@ func main() {
 						return err
 					}
 
-					IDint, err := strconv.Atoi(ID)
+					intID, err := strconv.Atoi(ID)
 					if err != nil {
 						return err
 					}
 
-					if err := completeTask(IDint); err != nil {
+					if err := changeTask(intID, "complete", ""); err != nil {
 						return err
 					}
-					fmt.Printf("task with an id=%v has completed\n", IDint)
+
+					fmt.Printf("task with an id=%v has completed\n", intID)
 					return nil
 				},
 			},
@@ -115,9 +116,10 @@ func main() {
 						return err
 					}
 
-					if err := deleteTask(intID); err != nil {
+					if err := changeTask(intID, "delete", ""); err != nil {
 						return err
 					}
+
 					fmt.Printf("task with an id=%v has removed\n", intID)
 					return nil
 				},
@@ -161,7 +163,8 @@ func main() {
 					}
 					newDeadline := c.Args().Get(1)
 
-					reDead(intID, newDeadline)
+					changeTask(intID, "reDead", newDeadline)
+
 					fmt.Printf("deadline of task with an ID %v changed on %s\n", intID, newDeadline)
 
 					return nil
@@ -190,48 +193,6 @@ func addTask(t task) error {
 		tx.MustExec("INSERT INTO tasks (content, category, deadline, complete) VALUES ($1, $2, $3, $4)", t.content, t.category, t.deadline, false)
 	}
 	tx.Commit()
-	return nil
-}
-
-func completeTask(ID int) error {
-	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	tx := db.MustBegin()
-	tx.MustExec("UPDATE tasks SET complete=true WHERE id = $1", ID)
-	tx.Commit()
-
-	return nil
-}
-
-func deleteTask(ID int) error {
-	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	tx := db.MustBegin()
-	tx.MustExec("DELETE FROM tasks WHERE id=$1", ID)
-	tx.Commit()
-
-	return nil
-}
-
-func reDead(ID int, newDeadline string) error {
-	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	tx := db.MustBegin()
-	tx.MustExec("UPDATE tasks set deadline=$1 WHERE id=$2", newDeadline, ID)
-	tx.Commit()
-
 	return nil
 }
 
@@ -308,6 +269,34 @@ func initTableTasks() error {
 	defer db.Close()
 
 	db.MustExec(table)
+
+	return nil
+}
+
+func changeTask(ID int, action string, value string) error {
+	db, err := sqlx.Open("postgres", "dbname=olanza sslmode=disable")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	if action == "complete" {
+		db.MustExec("UPDATE tasks SET complete=true WHERE id = $1", ID)
+
+		return nil
+	}
+
+	if action == "delete" {
+		db.MustExec("DELETE FROM tasks WHERE id=$1", ID)
+
+		return nil
+	}
+
+	if action == "reDead" {
+		db.MustExec("UPDATE tasks set deadline=$1 WHERE id=$2", value, ID)
+
+		return nil
+	}
 
 	return nil
 }
